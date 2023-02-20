@@ -92,7 +92,7 @@ def query():
     else:
         query_obj = create_query("*", [], sort, sortDir)
 
-    print("query obj: {}".format(query_obj))
+    print("query obj: \n{}".format(json.dumps(query_obj)))
 
     #### Step 4.b.ii
     response = opensearch.search(
@@ -116,19 +116,33 @@ def create_query(user_query, filters, sort="_score", sortDir="desc"):
     print("Query: {} Filters: {} Sort: {}".format(user_query, filters, sort))
     query_obj = {
         'size': 10,
-        'query': {
-            'query_string': {'query': user_query,
-                             'fields': ["name^1000", "shortDescription^50", "longDescription^10", "department"],
-                             "default_operator": "AND",
-                             "minimum_should_match": "2"
-
-                             },
-
-        },
         "highlight": {
             "fields": {
                 "name": {},
                 "shortDescription": {}
+            }
+        },
+        "sort": [
+            {
+                sort: {
+                    "order": sortDir
+                }
+            }
+        ],
+        'query': {
+            "bool": {
+                "must": [
+                    {
+                        'query_string': {'query': user_query,
+                                         'fields': ["name^1000", "shortDescription^50", "longDescription^10",
+                                                    "department"],
+                                         "default_operator": "AND",
+                                         "minimum_should_match": "2",
+                                         "phrase_slop": 2
+                                         },
+                    }
+                ],
+                "filter": filters
             }
         },
         'aggs': {
@@ -179,12 +193,6 @@ def create_query(user_query, filters, sort="_score", sortDir="desc"):
                 "missing": {"field": "image"}
             }
         },
-        "sort": [
-            {
-                sort: {
-                    "order": sortDir
-                }
-            }
-        ]
+
     }
     return query_obj

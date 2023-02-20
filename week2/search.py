@@ -7,7 +7,10 @@ from flask import (
 
 from week2.opensearch import get_opensearch
 
+
 import week2.utilities.query_utils as qu
+
+from week2.utilities.query_utils import add_spelling_suggestions
 
 bp = Blueprint('search', __name__, url_prefix='/search')
 
@@ -55,21 +58,45 @@ def process_filters(filters_input):
 
     return filters, display_filters, applied_filters
 
+
 @bp.route('/autocomplete', methods=['GET'])
 def autocomplete():
     results = {}
     if request.method == 'GET':  # a query has been submitted
+        opensearch = get_opensearch()
         prefix = request.args.get("prefix")
         print(f"Prefix: {prefix}")
         if prefix is not None:
-            type = request.args.get("type", "queries") # If type == queries, this is an autocomplete request, else if products, it's an instant search request.
+            type = request.args.get("type",
+                                    "queries")  # If type == queries, this is an autocomplete request, else if products, it's an instant search request.
             ##### W2, L3, S1
             search_response = None
-            print("TODO: implement autocomplete AND instant search")
-            if (search_response and search_response['suggest']['autocomplete'] and search_response['suggest']['autocomplete'][0]['length'] > 0): # just a query response
+            field = "suggest"
+            suggest_obj = {
+                "suggest": {
+                    "autocomplete": {
+                        "prefix": prefix,
+                        "completion": {
+                            "field": field,
+                            "skip_duplicates": True
+                        }
+                    }
+                },
+                "_source": "canonical"
+            }
+            if type == "queries":
+                index_name = "bbuy_queries"
+            elif type == "products":
+                index_name = "bbuy_products"
+            else:
+                index_name = "bbuy_queries"
+            search_response = opensearch.search(body=suggest_obj, index=index_name)  # these look like search results
+            if (search_response and search_response['suggest']['autocomplete'] and
+                    search_response['suggest']['autocomplete'][0]['length'] > 0):  # just a query response
                 results = search_response['suggest']['autocomplete'][0]['options']
     print(f"Results: {results}")
     return {"completions": results}
+
 
 @bp.route('/query', methods=['GET', 'POST'])
 def query():
@@ -104,9 +131,10 @@ def query():
         if explain_val == "true":
             explain = True
 
-        query_obj = qu.create_query(user_query,  [], sort, sortDir, size=20)  # We moved create_query to a utility class so we could use it elsewhere.
+        query_obj = qu.create_query(user_query, [], sort, sortDir,
+                                    size=20)  # We moved create_query to a utility class so we could use it elsewhere.
         ##### W2, L1, S2
-
+        add_spelling_suggestions(query_obj, user_query)
         ##### W2, L2, S2
         print("Plain ol q: %s" % query_obj)
     elif request.method == 'GET':  # Handle the case where there is no query or just loading the page
@@ -119,23 +147,22 @@ def query():
             explain = True
         if filters_input:
             (filters, display_filters, applied_filters) = process_filters(filters_input)
-        query_obj = qu.create_query(user_query,  filters, sort, sortDir, size=20)
+        query_obj = qu.create_query(user_query, filters, sort, sortDir, size=20)
         #### W2, L1, S2
-
+        add_spelling_suggestions(query_obj, user_query)
         ##### W2, L2, S2
 
     else:
         query_obj = qu.create_query("*", "", [], sort, sortDir, size=100)
 
-    #print("query obj: {}".format(query_obj))
+    # print("query obj: {}".format(query_obj))
     response = opensearch.search(body=query_obj, index="bbuy_products", explain=explain)
     # Postprocess results here if you so desire
 
-    #print(response)
+    # print(response)
     if error is None:
         return render_template("search_results.jinja2", query=user_query, search_response=response,
                                display_filters=display_filters, applied_filters=applied_filters,
                                sort=sort, sortDir=sortDir, explain=explain, autocompleteSelect=autocompleteSelect)
     else:
         redirect(url_for("index"))
-
